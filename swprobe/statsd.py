@@ -23,6 +23,8 @@
 # OTHER DEALINGS IN THE SOFTWARE.
 #
 
+from socket import *
+
 class Statsd(object):
     # Modified version of https://github.com/etsy/statsd/blob/master/examples/python_example.py
  
