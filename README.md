@@ -39,12 +39,12 @@ Metrics
 -------
 The following metrics are created:
 
-1. Timers:
+1) Timers:
 
     auth - time spent in miliseconds on requests to /auth
     <account_name>.<HTTP_METHOD>_<HTTP_STATUS> - per account timings/counts for HTTP methods used and http responses sent.
 
-2. Counters:
+2) Counters:
 
     Counters for all the timers listed
     <account_name>.bytes_uploaded - number of bytes uploaded to account
