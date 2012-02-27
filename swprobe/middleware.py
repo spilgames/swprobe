@@ -92,9 +92,8 @@ class ProbeMiddleware(object):
         except ValueError:
             pass
         except Exception as e:
-            self.logger.error(_('ERROR: Exception while trying to capture stats %s' % e)
-        finally:
-            return response
+            self.logger.error(_('ERROR: Exception while trying to capture stats %s' % e))
+        return response
 
 
 def filter_factory(global_conf, **local_conf):
