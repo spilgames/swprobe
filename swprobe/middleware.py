@@ -65,31 +65,36 @@ class ProbeMiddleware(object):
         response = self.app(env, start_response)
         end = datetime.datetime.now()
         time = float((end-start).microseconds) / 1000.0
-        # Get response object from environment
-        response_obj = env["webob.adhoc_attrs"]["response"]
-        # Convert 204 into 200 etc
-        response_code = response_obj.status_int // 100 * 100
-        # This is the response size for GETs
-        response_size = response_obj.content_length
+        try:
+            # Get response object from environment
+            response_obj = env["webob.adhoc_attrs"]["response"]
+            # Convert 204 into 200 etc
+            response_code = response_obj.status_int // 100 * 100
+            # This is the response size for GETs
+            response_size = response_obj.content_length
 
-        if req.path.startswith("/auth"):
-            # Time how long auth request takes
-            self.statsd.timing("auth", time)
-        else:
-            # Find out for which account the request was made
-            if "REMOTE_USER" in env.keys():
-                swift_account = env["REMOTE_USER"].split(",")[1]
+            if req.path.startswith("/auth"):
+                # Time how long auth request takes
+                self.statsd.timing("auth", time)
             else:
-                swift_account = "anonymous"
-            self.statsd.timing("%s.%s_%s" %(swift_account, req.method, response_code), time)
-            # Upload and download size statistics
-            if req.method == "PUT":
-                size = env["webob.adhoc_attrs"]["bytes_transferred"]
-                self.statsd.update_stats("%s.bytes_uploaded" % swift_account, size)
-            elif req.method == "GET":
-                self.statsd.update_stats("%s.bytes_downloaded" % swift_account, response_size)
-                
-        return response
+                # Find out for which account the request was made
+                if "REMOTE_USER" in env.keys():
+                    swift_account = env["REMOTE_USER"].split(",")[1]
+                else:
+                    swift_account = "anonymous"
+                self.statsd.timing("%s.%s_%s" %(swift_account, req.method, response_code), time)
+                # Upload and download size statistics
+                if req.method == "PUT":
+                    size = env["webob.adhoc_attrs"]["bytes_transferred"]
+                    self.statsd.update_stats("%s.bytes_uploaded" % swift_account, size)
+                elif req.method == "GET":
+                    self.statsd.update_stats("%s.bytes_downloaded" % swift_account, response_size)
+        except ValueError:
+            pass
+        except Exception as e:
+            self.logger.error(_('ERROR: Exception while trying to capture stats %s' % e)
+        finally:
+            return response
 
 
 def filter_factory(global_conf, **local_conf):
