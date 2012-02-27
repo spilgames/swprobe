@@ -77,7 +77,10 @@ class ProbeMiddleware(object):
             self.statsd.timing("auth", time)
         else:
             # Find out for which account the request was made
-            swift_account = env["REMOTE_USER"].split(",")[1]
+            if "REMOTE_USER" in env.keys():
+                swift_account = env["REMOTE_USER"].split(",")[1]
+            else:
+                swift_account = "anonymous"
             self.statsd.timing("%s.%s_%s" %(swift_account, req.method, response_code), time)
             # Upload and download size statistics
             if req.method == "PUT":
