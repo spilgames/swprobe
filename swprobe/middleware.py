@@ -83,17 +83,16 @@ class ProbeMiddleware(object):
                     swift_account = env["REMOTE_USER"].split(",")[1]
                 else:
                     swift_account = "anonymous"
-                self.statsd.increment("%s.%s.%s" %(swift_account, req.method,
-                    response_code))
+                self.statsd.increment("req.%s.%s.%s" %(swift_account, req.method, response_code))
                 if response_code == 200:
                     # Log timers for succesful requests
                     self.statsd.timing("%s" %(req.method), time)
                 # Upload and download size statistics
                 if req.method == "PUT":
                     size = env["webob.adhoc_attrs"]["bytes_transferred"]
-                    self.statsd.update_stats("%s.bytes_uploaded" % swift_account, size)
+                    self.statsd.update_stats("xfer.%s.bytes_uploaded" % swift_account, size)
                 elif req.method == "GET":
-                    self.statsd.update_stats("%s.bytes_downloaded" % swift_account, response_size)
+                    self.statsd.update_stats("xfer.%s.bytes_downloaded" % swift_account, response_size)
         except ValueError:
             pass
         except Exception as e:
