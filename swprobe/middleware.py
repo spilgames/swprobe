@@ -85,7 +85,9 @@ class ProbeMiddleware(object):
                     swift_account = "anonymous"
                 self.statsd.increment("%s.%s.%s" %(swift_account, req.method,
                     response_code))
-                self.statsd.timing("%s.%s.%s" %(swift_account, req.method, response_code), time)
+                if reponse_code == 200 or response_code == 300:
+                    # Log timers for succesful requests
+                    self.statsd.timing("%s" %(req.method), time)
                 # Upload and download size statistics
                 if req.method == "PUT":
                     size = env["webob.adhoc_attrs"]["bytes_transferred"]
