@@ -85,7 +85,7 @@ class ProbeMiddleware(object):
                     swift_account = "anonymous"
                 self.statsd.increment("%s.%s.%s" %(swift_account, req.method,
                     response_code))
-                if reponse_code == 200 or response_code == 300:
+                if reponse_code == 200:
                     # Log timers for succesful requests
                     self.statsd.timing("%s" %(req.method), time)
                 # Upload and download size statistics
