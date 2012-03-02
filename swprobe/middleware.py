@@ -75,6 +75,7 @@ class ProbeMiddleware(object):
 
             if req.path.startswith("/auth"):
                 # Time how long auth request takes
+                self.statsd.increment("auth")
                 self.statsd.timing("auth", time)
             else:
                 # Find out for which account the request was made
@@ -82,7 +83,9 @@ class ProbeMiddleware(object):
                     swift_account = env["REMOTE_USER"].split(",")[1]
                 else:
                     swift_account = "anonymous"
-                self.statsd.timing("%s.%s_%s" %(swift_account, req.method, response_code), time)
+                self.statsd.increment("%s.%s.%s" %(swift_account, req.method,
+                    response_code))
+                self.statsd.timing("%s.%s.%s" %(swift_account, req.method, response_code), time)
                 # Upload and download size statistics
                 if req.method == "PUT":
                     size = env["webob.adhoc_attrs"]["bytes_transferred"]
