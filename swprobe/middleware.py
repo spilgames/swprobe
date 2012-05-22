@@ -1,4 +1,5 @@
 # Copyright (c) 2012 Spil Games
+# Copyright (c) 2010-2011 OpenStack, LLC.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,7 +34,7 @@ from webob import Request, Response
 from socket import *
 import sys
 from pprint import *
-import datetime
+from time import time
 from statsd import Statsd
 from swift.common.utils import split_path, cache_from_env, get_logger
 
@@ -56,49 +57,73 @@ class ProbeMiddleware(object):
         """Returns a 200 response with "OK" in the body."""
         return Response(request=req, body="OK", content_type="text/plain")
 
+    def statsd_event(self, env, req):
+        request_time = time() - env['swprobe.start_time']
+        headers = dict(env['swprobe.headers'])
+        response = getattr(req, 'response', None)
+        if getattr(req, 'client_disconnect', False) or \
+                   getattr(response, 'client_disconnect', False):
+            status_int = 499
+        else:
+            status_int = env['swprobe.status']
+        duration = (time() - env['swprobe.start_time']) * 1000
+
+        # Find out how much bytes were transferred. For PUTs we can get this from the request object,
+        # but for GETs we look at the Content-Length header of the response
+        # Don't know how to find out # bytes transferred for aborted transfers
+        transferred = getattr(req, 'bytes_transferred', 0)
+        if transferred is '-' or transferred is 0:
+            transferred = getattr(response, 'bytes_transferred', 0)
+        if transferred is 0 and status_int is not 499 and req.method is "GET":
+            transferred = headers['Content-Length']
+        if transferred is '-':
+            transferred = 0
+
+        if req.path.startswith("/auth"):
+            # Time how long auth request takes
+            self.statsd.increment("req.auth")
+            self.statsd.timing("auth", duration)
+        else:
+            # Find out for which account the request was made
+            if "REMOTE_USER" in env.keys():
+                swift_account = env["REMOTE_USER"].split(",")[1]
+            else:
+                swift_account = "anonymous"
+            self.statsd.increment("req.%s.%s.%s" %(swift_account, req.method, status_int))
+            if status_int >= 200 and status_int < 400:
+                # Log timers for succesful requests
+                self.statsd.timing("%s" %(req.method), duration)
+            # Upload and download size statistics
+            if req.method == "PUT":
+                self.statsd.update_stats("xfer.%s.bytes_uploaded" % swift_account, transferred)
+            elif req.method == "GET":
+                self.statsd.update_stats("xfer.%s.bytes_downloaded" % swift_account, transferred)
+
     def __call__(self, env, start_response):
+        """WSGI callable"""
+
+        def _start_response(status, headers, exc_info=None):
+            """start_response wrapper to grab headers and status code"""
+            env['swprobe.status'] = int(status.split(' ', 1)[0])
+            env['swprobe.headers'] = headers
+            start_response(status, headers, exc_info)
+
         req = Request(env)
 
-        # Go to the next app in the pipeline
-        # try to capture response before sending it back
-        start = datetime.datetime.now()
-        response = self.app(env, start_response)
-        end = datetime.datetime.now()
-        time = float((end-start).microseconds) / 1000.0
+        # Rewrite: this code is borrowed from swift-informant and seems to be the proper way to do this.
+        # Get out of the main request flow and do everything after the request has been served
         try:
-            # Get response object from environment
-            response_obj = env["webob.adhoc_attrs"]["response"]
-            # Convert 204 into 200 etc
-            response_code = response_obj.status_int // 100 * 100
-            # This is the response size for GETs
-            response_size = response_obj.content_length
-
-            if req.path.startswith("/auth"):
-                # Time how long auth request takes
-                self.statsd.increment("auth")
-                self.statsd.timing("auth", time)
-            else:
-                # Find out for which account the request was made
-                if "REMOTE_USER" in env.keys():
-                    swift_account = env["REMOTE_USER"].split(",")[1]
-                else:
-                    swift_account = "anonymous"
-                self.statsd.increment("req.%s.%s.%s" %(swift_account, req.method, response_code))
-                if response_code == 200:
-                    # Log timers for succesful requests
-                    self.statsd.timing("%s" %(req.method), time)
-                # Upload and download size statistics
-                if req.method == "PUT":
-                    size = env["webob.adhoc_attrs"]["bytes_transferred"]
-                    self.statsd.update_stats("xfer.%s.bytes_uploaded" % swift_account, size)
-                elif req.method == "GET":
-                    self.statsd.update_stats("xfer.%s.bytes_downloaded" % swift_account, response_size)
-        except ValueError:
-            pass
-        except Exception as e:
-            self.logger.error(_('ERROR: Exception while trying to capture stats %s' % e))
-        return response
-
+            # register the post-hook
+            if 'eventlet.posthooks' in env:
+                env['swprobe.start_time'] = time()
+                env['eventlet.posthooks'].append(
+                    (self.statsd_event, (req,), {}))
+            return self.app(env, _start_response)
+        except Exception:
+            self.logger.exception('WSGI EXCEPTION:')
+            _start_response('500 Internal Server Error',
+                            [('Content-Length', '0')])
+            return []
 
 def filter_factory(global_conf, **local_conf):
     conf = global_conf.copy()
