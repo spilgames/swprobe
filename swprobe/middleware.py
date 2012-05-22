@@ -58,46 +58,54 @@ class ProbeMiddleware(object):
         return Response(request=req, body="OK", content_type="text/plain")
 
     def statsd_event(self, env, req):
-        request_time = time() - env['swprobe.start_time']
-        headers = dict(env['swprobe.headers'])
-        response = getattr(req, 'response', None)
-        if getattr(req, 'client_disconnect', False) or \
-                   getattr(response, 'client_disconnect', False):
-            status_int = 499
-        else:
-            status_int = env['swprobe.status']
-        duration = (time() - env['swprobe.start_time']) * 1000
-
-        # Find out how much bytes were transferred. For PUTs we can get this from the request object,
-        # but for GETs we look at the Content-Length header of the response
-        # Don't know how to find out # bytes transferred for aborted transfers
-        transferred = getattr(req, 'bytes_transferred', 0)
-        if transferred is '-' or transferred is 0:
-            transferred = getattr(response, 'bytes_transferred', 0)
-        if transferred is 0 and status_int is not 499 and req.method is "GET":
-            transferred = headers['Content-Length']
-        if transferred is '-':
-            transferred = 0
-
-        if req.path.startswith("/auth"):
-            # Time how long auth request takes
-            self.statsd.increment("req.auth")
-            self.statsd.timing("auth", duration)
-        else:
-            # Find out for which account the request was made
-            if "REMOTE_USER" in env.keys():
-                swift_account = env["REMOTE_USER"].split(",")[1]
+        try:
+            request_time = time() - env['swprobe.start_time']
+            headers = dict(env['swprobe.headers'])
+            response = getattr(req, 'response', None)
+            if getattr(req, 'client_disconnect', False) or \
+                       getattr(response, 'client_disconnect', False):
+                status_int = 499
             else:
-                swift_account = "anonymous"
-            self.statsd.increment("req.%s.%s.%s" %(swift_account, req.method, status_int))
-            if status_int >= 200 and status_int < 400:
-                # Log timers for succesful requests
-                self.statsd.timing("%s" %(req.method), duration)
-            # Upload and download size statistics
-            if req.method == "PUT":
-                self.statsd.update_stats("xfer.%s.bytes_uploaded" % swift_account, transferred)
-            elif req.method == "GET":
-                self.statsd.update_stats("xfer.%s.bytes_downloaded" % swift_account, transferred)
+                status_int = env['swprobe.status']
+            duration = (time() - env['swprobe.start_time']) * 1000
+
+            # Find out how much bytes were transferred. For PUTs we can get this from the request object,
+            # but for GETs we look at the Content-Length header of the response
+            # Don't know how to find out # bytes transferred for aborted transfers
+            transferred = getattr(req, 'bytes_transferred', 0)
+            if transferred is '-' or transferred is 0:
+                transferred = getattr(response, 'bytes_transferred', 0)
+            if transferred is 0 and status_int is not 499 and req.method is "GET":
+                transferred = headers['Content-Length']
+            if transferred is '-':
+                transferred = 0
+
+            if req.path.startswith("/auth"):
+                # Time how long auth request takes
+                self.statsd.increment("req.auth")
+                self.statsd.timing("auth", duration)
+            else:
+                # Find out for which account the request was made
+                if "REMOTE_USER" in env.keys():
+                    swift_account = env["REMOTE_USER"].split(",")[1]
+                else:
+                    swift_account = "anonymous"
+                self.statsd.increment("req.%s.%s.%s" %(swift_account, req.method, status_int))
+                if status_int >= 200 and status_int < 400:
+                    # Log timers for succesful requests
+                    self.statsd.timing("%s" %(req.method), duration)
+                # Upload and download size statistics
+                if req.method == "PUT":
+                    self.statsd.update_stats("xfer.%s.bytes_uploaded" % swift_account, transferred)
+                elif req.method == "GET":
+                    self.statsd.update_stats("xfer.%s.bytes_downloaded" % swift_account, transferred)
+        except Exception as e:
+            try:
+                self.logger.exception(_("Encountered error in statsd_event"))
+                self.logger.exception(e)
+            except Exception:
+                pass
+
 
     def __call__(self, env, start_response):
         """WSGI callable"""
