@@ -1,5 +1,5 @@
 %define short_name swprobe
-%define version 0.1.9
+%define version 0.2.1
 %define release SPI1
 %{!?python_sitelib: %define python_sitelib %(%{__python} -c "from distutils.sysconfig import get_python_lib; print get_python_lib()")}
 
