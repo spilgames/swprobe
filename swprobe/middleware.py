@@ -86,9 +86,9 @@ class ProbeMiddleware(object):
                 self.statsd.timing("auth", duration)
             else:
                 # Find out for which account the request was made
-                if "REMOTE_USER" in env.keys():
+                try:
                     swift_account = env["REMOTE_USER"].split(",")[1]
-                else:
+                except:
                     swift_account = "anonymous"
                 self.statsd.increment("req.%s.%s.%s" %(swift_account, req.method, status_int))
                 if status_int >= 200 and status_int < 400:
