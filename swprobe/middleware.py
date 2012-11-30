@@ -73,18 +73,15 @@ class ProbeMiddleware(object):
             # but for GETs we look at the Content-Length header of the response
             # Don't know how to find out # bytes transferred for aborted transfers
             transferred = getattr(req, 'bytes_transferred', 0)
-            if transferred is '-' or transferred is 0:
+            transferred = 0 if transferred == '-' else int(transferred)
+            if transferred is 0:
                 transferred = getattr(response, 'bytes_transferred', 0)
-            if transferred is 0 and status_int is not 499 and req.method is "GET":
-                transferred = headers['Content-Length']
-            if transferred is '-':
-                transferred = 0
-
             if req.path.startswith("/auth"):
                 # Time how long auth request takes
                 self.statsd.increment("req.auth")
                 self.statsd.timing("auth", duration)
-            else:
+            elif transferred == 0 and status_int != 499 and req.method == "GET":
+                transferred = headers['content-length']
                 # Find out for which account the request was made
                 try:
                     swift_account = env["REMOTE_USER"].split(",")[1]
@@ -112,8 +109,10 @@ class ProbeMiddleware(object):
 
         def _start_response(status, headers, exc_info=None):
             """start_response wrapper to grab headers and status code"""
+            # Convert all headers to lower case
+            new_h = [(k.lower(), v) for k,v in headers]
+            env['swprobe.headers'] = new_h
             env['swprobe.status'] = int(status.split(' ', 1)[0])
-            env['swprobe.headers'] = headers
             start_response(status, headers, exc_info)
 
         req = Request(env)
