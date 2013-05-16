@@ -84,7 +84,12 @@ class ProbeMiddleware(object):
                 transferred = headers['content-length']
                 # Find out for which account the request was made
                 try:
-                    swift_account = env["REMOTE_USER"].split(",")[1]
+                    if 'keystone.identity' in env.keys():
+                        # If authenticated by keystone
+                        swift_account = env['keystone.identity']['tenant'][1]
+                    else:
+                        # If authenticated by swauth or externally
+                        swift_account = env["REMOTE_USER"].split(",")[1]
                 except:
                     swift_account = "anonymous"
                 self.statsd.increment("req.%s.%s.%s" %(swift_account, req.method, status_int))
