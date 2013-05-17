@@ -73,40 +73,42 @@ class ProbeMiddleware(object):
             # but for GETs we look at the Content-Length header of the response
             # Don't know how to find out # bytes transferred for aborted transfers
             transferred = getattr(req, 'bytes_transferred', 0)
+            if transferred == 0 and 'CONTENT_LENGTH' in env.keys():
+                transferred = env['CONTENT_LENGTH']
             transferred = 0 if transferred == '-' else int(transferred)
-            if transferred is 0:
-                transferred = getattr(response, 'bytes_transferred', 0)
+            if transferred == 0 and status_int != 499 and req.method == "GET":
+                transferred = headers['content-length']
             if req.path.startswith("/auth"):
                 # Time how long auth request takes
                 self.statsd.increment("req.auth")
                 self.statsd.timing("auth", duration)
-            elif transferred == 0 and status_int != 499 and req.method == "GET":
-                transferred = headers['content-length']
-                # Find out for which account the request was made
-                try:
-                    if 'keystone.identity' in env.keys():
-                        # If authenticated by keystone
-                        swift_account = env['keystone.identity']['tenant'][1]
-                    else:
-                        # If authenticated by swauth or externally
-                        swift_account = env["REMOTE_USER"].split(",")[1]
-                except:
-                    swift_account = "anonymous"
-                self.statsd.increment("req.%s.%s.%s" %(swift_account, req.method, status_int))
-                if status_int >= 200 and status_int < 400:
-                    # Log timers for succesful requests
-                    self.statsd.timing("%s" %(req.method), duration)
-                # Upload and download size statistics
-                if req.method == "PUT":
-                    self.statsd.update_stats("xfer.%s.bytes_uploaded" % swift_account, transferred)
-                elif req.method == "GET":
-                    self.statsd.update_stats("xfer.%s.bytes_downloaded" % swift_account, transferred)
+                return None
+            # Find out for which account the request was made
+            try:
+                if 'keystone.identity' in env.keys():
+                    # If authenticated by keystone
+                    swift_account = env['keystone.identity']['tenant'][1]
+                else:
+                    # If authenticated by swauth or externally
+                    swift_account = env["REMOTE_USER"].split(",")[1]
+            except:
+                swift_account = "anonymous"
+            self.statsd.increment("req.%s.%s.%s" %(swift_account, req.method, status_int))
+            if status_int >= 200 and status_int < 400:
+                # Log timers for succesful requests
+                self.statsd.timing("%s" %(req.method), duration)
+            # Upload and download size statistics
+            if req.method == "PUT":
+                self.statsd.update_stats("xfer.%s.bytes_uploaded" % swift_account, transferred)
+            elif req.method == "GET":
+                self.statsd.update_stats("xfer.%s.bytes_downloaded" % swift_account, transferred)
         except Exception as e:
             try:
                 self.logger.exception(_("Encountered error in statsd_event"))
                 self.logger.exception(e)
             except Exception:
                 pass
+
 
 
     def __call__(self, env, start_response):
@@ -121,21 +123,11 @@ class ProbeMiddleware(object):
             start_response(status, headers, exc_info)
 
         req = Request(env)
-
-        # Rewrite: this code is borrowed from swift-informant and seems to be the proper way to do this.
-        # Get out of the main request flow and do everything after the request has been served
-        try:
-            # register the post-hook
-            if 'eventlet.posthooks' in env:
-                env['swprobe.start_time'] = time()
-                env['eventlet.posthooks'].append(
-                    (self.statsd_event, (req,), {}))
-            return self.app(env, _start_response)
-        except Exception:
-            self.logger.exception('WSGI EXCEPTION:')
-            _start_response('500 Internal Server Error',
-                            [('Content-Length', '0')])
-            return []
+        env['swprobe.start_time'] = time()
+        if not 'eventlet.posthooks' in env:
+            env['eventlet.posthooks'] = []
+        env['eventlet.posthooks'].append((self.statsd_event, (req,), {}))
+        return self.app(env, _start_response)
 
 def filter_factory(global_conf, **local_conf):
     conf = global_conf.copy()
